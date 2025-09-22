@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         CONTAINER_NAME = "nestjs-app"
-        IMAGE_NAME = "nestjs-image"
+        IMAGE_NAME = "my-nestjs-image"
         PORT = "3000"
         EMAIL = "s21486770@gmail.com"
     }
@@ -11,7 +11,7 @@ pipeline {
     stages {
         stage("Clone Repo") {
             steps {
-                git branch: 'main', url: 'https://github.com/sabaramzan123/Nestjs-CICD-with-Docker-and-Jenkins'
+                git branch: 'main', url: 'https://github.com/sabaramzan123/CICD-Nest-js-App'
             }
         }
 
@@ -43,7 +43,7 @@ pipeline {
         stage("Send Email Notification") {
             steps {
                 emailext(
-                    subject: "NestJS App Deployed Successfully 🚀",
+                    subject: "NestJS App Deployed Successfully",
                     body: "Your app is live at: http://${env.NODE_NAME}:${PORT}/",
                     to: "${EMAIL}"
                 )
