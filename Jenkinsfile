@@ -14,6 +14,7 @@ pipeline {
                 git branch: 'main', url: 'https://github.com/sabaramzan123/CICD-Nest-js-App'
             }
         }
+        
 
         stage("Stop and Remove Old Container") {
             steps {
