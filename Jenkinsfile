@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        CONTAINER_NAME = "nestjs-app"
-        IMAGE_NAME = "my-nestjs-image"
+        CONTAINER_NAME = "nest_js_cicd"
+        IMAGE_NAME = "nest_js_cicd"
         PORT = "3000"
-        EMAIL = "s21486770@gmail.com"
+        EMAIL = "sabaramzan0226@gmail.com
     }
 
     stages {
