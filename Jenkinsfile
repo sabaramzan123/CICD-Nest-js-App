@@ -7,7 +7,6 @@ pipeline {
         PORT           = "3000"
         EMAIL          = "sabaramzan0226@gmail.com"
         TAR_PATH       = "/home/ubuntu/nestjs-app.tar"
-        
     }
 
     stages {
