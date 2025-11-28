@@ -2,82 +2,57 @@ pipeline {
     agent any
 
     environment {
-        AWS_ACCOUNT_ID = '303713699681'                 // Replace with your AWS account ID
-        AWS_REGION = 'us-east-1'                        // Replace with your region
-        IMAGE_NAME = 'nest_js_cicd'
-        CONTAINER_NAME = 'nestjs_app'
-        PORT = '3000'                                   // Port your app listens on inside container
-        EMAIL = 'sabaramzan0226@gmail.com'             // Notification email
-        EC2_IP = '107.23.162.42'                     // Replace with your EC2 public IP
-        ECR_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}"
-        
+        CONTAINER_NAME = "my-nestjs-app"
+        IMAGE_NAME     = "nest_js_cicd"
+        PORT           = "3000"
+        EMAIL          = "sabaramzan0226@gmail.com"
+        TAR_PATH       = "/home/ubuntu/nestjs-app.tar"
     }
 
     stages {
-        stage('Checkout Code') {
+
+        stage("Clone Repo") {
             steps {
                 git branch: 'main', url: 'https://github.com/sabaramzan123/CICD-Nest-js-App'
             }
         }
 
-        stage('Build Docker Image') {
+        stage("Stop & Remove Old Container") {
             steps {
-                sh """
-                docker build -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
-                """
+                sh '''
+                echo "Stopping old container (if running)..."
+                sudo docker stop $CONTAINER_NAME || true
+                sudo docker rm $CONTAINER_NAME || true
+                '''
             }
         }
 
-        stage('Login to ECR') {
+        stage("Load Docker Image") {
             steps {
-                sh """
-                aws ecr get-login-password --region ${AWS_REGION} | \
-                docker login --username AWS --password-stdin ${ECR_URI}
-                """
+                sh '''
+                echo "Loading image from tar..."
+                sudo docker load -i ${TAR_PATH}
+                '''
             }
         }
 
-        stage('Push Docker Image to ECR') {
+        stage("Run Container") {
             steps {
-                sh """
-                docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${ECR_URI}:${env.BUILD_NUMBER}
-                docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${ECR_URI}:latest
-                docker push ${ECR_URI}:${env.BUILD_NUMBER}
-                docker push ${ECR_URI}:latest
-                """
+                sh '''
+                echo "Starting new container..."
+                sudo docker run -d -p ${PORT}:${PORT} --name $CONTAINER_NAME $IMAGE_NAME:latest
+                '''
             }
         }
 
-        stage('Deploy to EC2') {
+        stage("Send Email Notification") {
             steps {
-                sh """
-                ssh -o StrictHostKeyChecking=no ubuntu@${EC2_IP} '
-                    aws ecr get-login-password --region ${AWS_REGION} | \
-                    docker login --username AWS --password-stdin ${ECR_URI} &&
-                    docker stop ${CONTAINER_NAME} || true &&
-                    docker rm ${CONTAINER_NAME} || true &&
-                    docker pull ${ECR_URI}:latest &&
-                    docker run -d -p 80:${PORT} --name ${CONTAINER_NAME} --restart unless-stopped ${ECR_URI}:latest
-                '
-                """
+                emailext(
+                    subject: "NestJS App Deployed Successfully",
+                    body: "Your NestJS application is live: http://${env.NODE_NAME}:${PORT}/",
+                    to: "${EMAIL}"
+                )
             }
-        }
-    }
-
-    post {
-        success {
-            emailext(
-                subject: "NestJS App Deployed Successfully",
-                body: "Your app is live at: http://${EC2_IP}/",
-                to: "${EMAIL}"
-            )
-        }
-        failure {
-            emailext(
-                subject: "NestJS App Deployment Failed",
-                body: "Check Jenkins logs for details.",
-                to: "${EMAIL}"
-            )
         }
     }
 }
