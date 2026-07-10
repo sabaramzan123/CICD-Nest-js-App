@@ -110,14 +110,22 @@ Uses the Jenkins **Email Extension Plugin** (`emailext`) to notify on successful
 
 ---
 
-## ⚠️ Important Note on the Current Pipeline
+## ⚠️ Design Decision: Local Build + `scp` + `docker load` (instead of building on the EC2 agent)
 
-This pipeline currently **loads** a Docker image from a `.tar` file (`docker load -i ${TAR_PATH}`) rather than **building** it from the `Dockerfile` in this repo. That means:
+This pipeline **loads** a pre-built Docker image from a `.tar` file (`docker load -i ${TAR_PATH}`) rather than running `docker build` directly on the Jenkins agent. This was a deliberate choice, not an oversight:
 
-- The `.tar` file must already exist at `/home/ubuntu/nestjs-app.tar` on the Jenkins agent *before* this pipeline runs
-- Code changes pulled in the "Clone Repo" stage are **not automatically reflected** in the deployed container unless the `.tar` is rebuilt and re-exported separately
+- The Jenkins agent runs on an **EC2 `t2.micro`** instance — with only 1 vCPU and 1 GB RAM, running `npm run build` + `docker build` on it either **failed outright** (out of memory / CPU throttling) or took a very long time due to CPU credit exhaustion on the burstable instance
+- To work around this, the Docker image is instead **built locally** (on a more capable machine) and then transferred to the EC2 agent using `scp`:
+  ```bash
+  docker build -t nest_js_cicd:latest .
+  docker save -o nestjs-app.tar nest_js_cicd:latest
+  scp nestjs-app.tar ubuntu@<ec2-ip>:/home/ubuntu/nestjs-app.tar
+  ```
+- The Jenkins pipeline then simply **loads** this already-built image (`docker load -i ${TAR_PATH}`) and runs it — a lightweight operation that a `t2.micro` handles comfortably
 
-**To make this a true end-to-end CI/CD pipeline** (build-on-every-push), add a build stage before "Load Docker Image":
+**Trade-off:** code changes pulled in the "Clone Repo" stage aren't automatically reflected in the deployed container — the `.tar` must be rebuilt locally and re-copied to the agent before each deploy. This is an intentional trade-off to keep the pipeline usable on low-resource, low-cost infrastructure, rather than upgrading the EC2 instance type solely to support in-pipeline builds.
+
+**If moving to a larger instance type (e.g. `t3.medium` or above) in the future**, the pipeline can be simplified by adding a build stage directly before "Load Docker Image", removing the manual `scp` step entirely:
 
 ```groovy
 stage("Build Docker Image") {
@@ -129,8 +137,6 @@ stage("Build Docker Image") {
     }
 }
 ```
-
-This removes the dependency on a manually maintained `.tar` file and ensures every pipeline run deploys the exact code that was just cloned.
 
 ---
 
@@ -147,9 +153,12 @@ This removes the dependency on a manually maintained `.tar` file and ensures eve
 1. Create a new Jenkins Pipeline job
 2. Point it to this repository's `Jenkinsfile` (or paste the pipeline script directly)
 3. Ensure Jenkins has permission to run `docker` commands (add the `jenkins` user to the `docker` group, or confirm `sudo` access is configured without a password prompt)
-4. If keeping the `.tar`-based load step, make sure the image archive exists at the configured `TAR_PATH` beforehand:
+4. Before running the pipeline, build and transfer the image from a local machine (since the EC2 agent's `t2.micro` size can't reliably build it):
    ```bash
-   docker save -o /home/ubuntu/nestjs-app.tar nest_js_cicd:latest
+   # On your local machine
+   docker build -t nest_js_cicd:latest .
+   docker save -o nestjs-app.tar nest_js_cicd:latest
+   scp nestjs-app.tar ubuntu@<ec2-ip>:/home/ubuntu/nestjs-app.tar
    ```
 5. Run the pipeline manually, or configure a GitHub webhook to trigger it on every push to `main`
 
@@ -166,15 +175,15 @@ curl http://localhost:3000
 - Writing a **Declarative Jenkins Pipeline** with clearly separated stages
 - Managing container lifecycle safely with idempotent stop/remove logic (`|| true`)
 - Integrating **automated email notifications** into a deployment pipeline
-- Understanding the difference between **loading a pre-built image** vs. **building fresh on every run** — and why the latter is essential for a true CI/CD loop
+- Understanding the difference between **loading a pre-built image** vs. **building fresh on every run**, and making a deliberate infrastructure trade-off (local build + `scp` + `docker load`) to work within the CPU/memory limits of a `t2.micro` Jenkins agent
 
 ---
 
 ## 🔮 Possible Improvements
 
-- Add a **Build Docker Image** stage to remove the manual `.tar` dependency (see note above)
+- Push images to a registry (Docker Hub, ECR) instead of a manually `scp`'d `.tar` file — this would remove the manual local-build step while still avoiding heavy builds on the `t2.micro` agent (build could run in GitHub Actions or a separate build server, then just be `docker pull`ed by Jenkins)
+- If budget allows, upgrade the Jenkins agent to a larger instance type (`t3.medium`+) and add an in-pipeline **Build Docker Image** stage to fully automate builds
 - Add a **Test** stage (`npm run test`) before deployment to catch regressions
-- Push images to a registry (Docker Hub, ECR) instead of relying on a local `.tar` file, so deployments aren't tied to a single Jenkins agent
 - Add a **health check** step after `docker run` to confirm the container is actually serving traffic before sending the success email
 - Parameterize the pipeline (branch name, image tag) for multi-environment deployments (dev/staging/prod)
 - Add credentials-based GitHub checkout if the repository ever becomes private
